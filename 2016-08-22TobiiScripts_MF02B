@@ -1,0 +1,761 @@
+#2016-08-22TobiiScripts
+
+#MF02B(單純詞　複合名詞)
+#西班牙AMLAPポスター発表
+#主要功能：各條件用四色表示　圖表高畫質　瞳孔徑　Feanklin探索起始點　
+
+####1.1 準備package
+library(ggplot2)
+library(reshape)　#cast(), melt()表格分解
+library(lme4.0)
+
+####1.2 將trial列表
+dataList <- list.files(pattern = "chen_practice_New") #為方便處理，將檔案列表
+dataList
+length(dataList)　　#檔案個數
+dataList[1]　　#確認其中一個檔案內容
+
+####1.3 去掉沒有fixation的trial
+for(n in 1:length(dataList)){
+temp <- read.table(dataList[n], head=T, sep="\t", na.string="NA", encoding="UTF-8")
+temp <- temp[temp$GazeEventType == "Fixation",]
+nrow(temp)
+if (nrow(temp) == 0) {
+    print(paste("Bad trial!", dataList[n]))
+  }
+}
+
+####1.4
+#"ListNo", "Condition", "ItemNoA", "ItemNoB", "C1Type1", "C1Type2", "C2Type1", "C2Type2", "SoundType", "TrialOrFiller", "Picture", "Sound", "CorrectAnswer" , "AOI1", "AOI2", "AOI3", "AOI4", "AOI5", "AOI6", "AOI7", "AOI8", "TypeTag1", "TypeTag2", "TypeTag3", "TypeTag4", "TypeTag5", "TypeTag6", "TypeTag7", "TypeTag8", "LocationTag1", "LocationTag2", "LocationTag3", "LocationTag4", "LocationTag5", "LocationTag6", "LocationTag7", "LocationTag8"
+
+
+dataall <- NULL
+numcol = 37  #evendata的欄位數
+
+for(n in 1:length(dataList)){ 
+print(paste("now access", n))
+
+temp <- read.table(dataList[n], head=T, sep="\t", na.string="NA", encoding="UTF-8")
+eventdata <- temp[1,]$StudioEventData  
+
+#整理欄位名
+colnames(temp)
+
+#[1] "X.U.FEFF.ParticipantName" "SegmentName"             
+#[3] "SegmentStart"             "SegmentEnd"              
+#[5] "SegmentDuration"          "RecordingTimestamp"      
+#[7] "StudioEvent"              "StudioEventData"         
+#[9] "FixationIndex"            "SaccadeIndex"            
+#[11] "GazeEventType"            "GazeEventDuration"       
+#[13] "FixationPointX..MCSpx."   "FixationPointY..MCSpx."  
+#[15] "PupilLeft"                "PupilRight"              
+#[17] "X"                 
+　　　　　　　　　　　　　　　　　
+#去掉欄位[7] "StudioEvent",　[8]"StudioEventData",  [17] "X"
+
+ temp <- temp[,c("X.U.FEFF.ParticipantName", "SegmentName", "SegmentStart", "SegmentEnd", "SegmentDuration", "RecordingTimestamp", "FixationIndex", "SaccadeIndex", "GazeEventType", "GazeEventDuration", "FixationPointX..MCSpx.", "FixationPointY..MCSpx.", "PupilLeft", "PupilRight")]
+
+#解決欄位亂碼
+  colnames(temp) <- c("ParticipantName", "SegmentName", "SegmentStart", "SegmentEnd", "SegmentDuration", "RecordingTimestamp", "FixationIndex", "SaccadeIndex", "GazeEventType", "GazeEventDuration", "FixationPointX", "FixationPointY", "PupilLeft", "PupilRight")
+
+#算每點反應間隔
+temp$rectime <- temp$RecordingTimestamp - temp$SegmentStart
+
+#刪除時間相關欄位"SegmantStart", "SegmentEnd", "SegmentDuration", "RecordingTimestamp",
+
+temp <- temp[,c("ParticipantName", "SegmentName", "FixationIndex", "GazeEventType", "GazeEventDuration", "FixationPointX", "SaccadeIndex", "FixationPointY", "PupilLeft", "PupilRight", "rectime")]
+
+for(i in 1:400){
+temp$rectime2  <- ifelse((temp$rectime >= (0 + (i-1)*20)),(i-1)*20,temp$rectime2)
+}
+
+#必須先處理FixationIndex, FixationPointX, FixationPointY的NA否則無法aggregate，
+#取出FixationとSaccade
+temp <- temp[temp$GazeEventType != "Unclassified",]
+
+#把SaccadeIndex轉移到FixationIndex上
+temp$FixationIndex <- ifelse(is.na(temp$FixationIndex), temp$SaccadeIndex, temp$FixationIndex)
+temp$FixationPointX <- ifelse(is.na(temp$FixationPointX), -1, temp$FixationPointX)
+temp$FixationPointY <- ifelse(is.na(temp$FixationPointY), -1, temp$FixationPointY)
+temp$SaccadeIndex <- NULL
+
+
+PupilLeft <- aggregate(temp$PupilLeft, list(temp$ParticipantName, temp$SegmentName, temp$FixationIndex,temp$GazeEventType, temp$GazeEventDuration, temp$FixationPointX, temp$FixationPointY,temp$rectime2), mean)
+PupilLeft$x<-ifelse(is.na(PupilLeft$x),-1,PupilLeft$x)
+ggplot(PupilLeft, aes(x=Group.8, y=x))+geom_line()
+
+PupilRight <- aggregate(temp$PupilRight, list(temp$ParticipantName, temp$SegmentName, temp$FixationIndex,temp$GazeEventType, temp$GazeEventDuration, temp$FixationPointX, temp$FixationPointY,temp$rectime2), mean)
+PupilRight$x<-ifelse(is.na(PupilRight$x),-1,PupilRight$x)
+
+#ggplot(PupilRight, aes(x=Group.8, y=x))+geom_line()
+
+temp2 <- cbind(PupilLeft, PupilRight$x)
+
+colnames(temp2) <- c("ParticipantName", "SegmentName", "FixationIndex", "GazeEventType", "GazeEventDuration", "FixationPointX", "FixationPointY", "rectime2", "PupilLeft", "PupilRight")
+
+#加入Eprime情報
+temp2$StudioEventData <- as.character(eventdata)
+list <- unlist(strsplit(temp2$StudioEventData, " "))
+　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　　
+if (length(list)/numcol != nrow(temp2)) {
+print(paste("Bad trial!", dataList[n]))
+}
+
+mat <- matrix(list, nrow = nrow(temp2), ncol = numcol, byrow=T)
+
+colnames(mat) <- c("list", "cond", "itemA", "itemB", "C1Type1", "C1Type2", "C2Type1", "C2Type2", "SoundType", "TrialOrFiller", "Picture", "Sound", "CorrectAnswer" , "AOI1", "AOI2", "AOI3", "AOI4", "AOI5", "AOI6", "AOI7", "AOI8", "TypeTag1", "TypeTag2", "TypeTag3", "TypeTag4", "TypeTag5", "TypeTag6", "TypeTag7", "TypeTag8", "LocationTag1", "LocationTag2", "LocationTag3", "LocationTag4", "LocationTag5", "LocationTag6", "LocationTag7", "LocationTag8")
+
+
+temp3 <- cbind(temp2, mat)
+
+dataall <- rbind(dataall, temp3)
+}
+
+write.csv(dataall, "PupilOutput1.csv", row.names=F)
+
+####去掉NA
+dataall <- read.csv("PupilOutput1.csv", header =T)
+dataall <-dataall[dataall$PupilLeft != -1,]
+dataall <-dataall[dataall$PupilRight != -1,]
+
+colnames(dataall)
+dataall.1<-dataall[,c("ParticipantName", "itemB", "cond", "rectime2", "PupilLeft", "PupilRight")]
+write.csv(dataall.1, "PupilOutput2.csv", row.names=F)
+
+####畫圖
+dataall.1 <- read.csv("PupilOutput2.csv", header =T)
+#Baseline版
+dataall.1 <- read.csv("PupilOutput2.Baseline200.csv", header =T)
+#dataall.1[dataall.1$cond=="a"&dataall.1$rectime2==740,]
+
+dataall.1$ PupilLeft <-ifelse(is.na(dataall.1$PupilLeft),-1, dataall.1$PupilLeft)
+dataall.1$ PupilRight <-ifelse(is.na(dataall.1$PupilRight),-1, dataall.1$PupilRight)
+dataall.1$ PupilMean <-ifelse(is.na(dataall.1$PupilMean),-1, dataall.1$PupilMean)
+
+dataall.1<-dataall.1[dataall.1$PupilLeft != -1,]
+dataall.1 <-dataall.1[dataall.1$PupilRight != -1,]
+dataall.1 <-dataall.1[dataall.1$PupilMean!= -1,]
+
+write.csv(dataall.1, "PupilOutput3.Baseline200.csv", row.names=F)
+
+
+#左眼
+dataall.1 <- read.csv ("PupilOutput3.Baseline200.csv", header =T)
+dataall.2 <- aggregate(dataall.1$PupilLeft, list(dataall.1$cond, dataall.1$rectime2), mean)
+colnames(dataall.2) <- c("cond", "rectime2", "PupilLeft")
+dataall.2 <- dataall.2[order(dataall.2$cond, dataall.2$rectime2),]
+ggplot(dataall.2, aes(x=rectime2, y=PupilLeft,colour=cond))+geom_line()
+
+dataall.3<-dataall.2[dataall.2$rectime2<3000& dataall.2$rectime2>100,]
+ggplot(dataall.3, aes(x=rectime2, y=PupilLeft,colour=cond))+geom_line()
+
+#右眼
+dataall.2 <- aggregate(dataall.1$PupilRight, list(dataall.1$cond, dataall.1$rectime2), mean)
+colnames(dataall.2) <- c("cond", "rectime2", "PupilRight")
+dataall.2 <- dataall.2[order(dataall.2$cond, dataall.2$rectime2),]
+ggplot(dataall.2, aes(x=rectime2, y=PupilRight,colour=cond))+geom_line()
+
+dataall.3<-dataall.2[dataall.2$rectime2<3000& dataall.2$rectime2>100,]
+ggplot(dataall.3, aes(x=rectime2, y=PupilRight,colour=cond))+geom_line()
+
+#平均
+#head(dataall.1)
+#dataall.1$PupilSum <- dataall.1$PupilLeft+ dataall.1$PupilRight
+#dataall.1$PupilMean <- (dataall.1$PupilLeft+ dataall.1$PupilRight)/2
+
+dataall.2 <- aggregate(dataall.1$PupilMean, list(dataall.1$cond, dataall.1$rectime2), mean)
+colnames(dataall.2) <- c("cond", "rectime2", "PupilMean")
+dataall.2 <- dataall.2[order(dataall.2$cond, dataall.2$rectime2),]
+ggplot(dataall.2, aes(x=rectime2, y=PupilMean,colour=cond))+geom_line()
+
+dataall.3<-dataall.2[dataall.2$rectime2<3000& dataall.2$rectime2>100,]
+ggplot(dataall.3, aes(x=rectime2, y=PupilMean,colour=cond))+geom_line()
+
+######統計
+#確認資料結構
+data<- read.csv("PupilOutput1.csv", header =T)
+data<-data[data$PupilLeft != -1,]
+data <-data[data$PupilRight != -1,]
+
+#Baseline version
+#write.csv(dataall.1, "PupilOutput3.Baseline500.csv", row.names=F)
+data<- read.csv("PupilOutput3.Baseline200.csv", header =T)
+
+summary(data)
+table(data$ParticipantName, data$cond)
+table(data$cond)
+
+#取需要的時段
+data2<-data[data$rectime2<2000& data$rectime2>1000,]
+colnames(data2)
+#兩眼平均
+head(data2)
+data2$PupilSum <- data2$PupilLeft+ data2$PupilRight
+data2$PupilMean <- (data2$PupilLeft+ data2$PupilRight)/2
+
+#概要
+tapply(data2$PupilLeft, data2$cond, mean)
+tapply(data2$PupilRight, data2$cond, mean)
+tapply(data2$PupilMean, data2$cond, mean)
+
+
+
+#條件標號
+data2$C1 <- ifelse(data2$cond == "a"| data2$cond == "b", 1,0)
+data2$C2 <- ifelse(data2$cond == "a"| data2$cond == "c", 1,0)
+tapply(data2$PupilLeft, list(data2$C1, data2$C2), mean)
+tapply(data2$PupilRight, list(data2$C1, data2$C2), mean)
+tapply(data2$PupilMean, list(data2$C1, data2$C2), mean)
+
+
+#中心化
+data2$C1 <- scale(data2$C1, scale=F)
+data2$C2 <- scale(data2$C2, scale=F)
+
+#left
+m10 <- lmer(PupilLeft ~ C1*C2 + (1+C1*C2|ParticipantName) + (1+C1*C2|itemB), data = data2)
+summary(m10)
+m9 <- lmer(PupilLeft ~ C1*C2 + (1+C1+C2|ParticipantName) + (1+C1*C2|itemB), data = data2)
+summary(m9)
+m8 <- lmer(PupilLeft ~ C1*C2 + (1+C1+C2|ParticipantName) + (1+C1+C2|itemB), data = data2)
+summary(m8)
+m7 <- lmer(PupilLeft ~ C1*C2 + (1+C1+C2|ParticipantName) + (1+C1|itemB), data = data2)
+summary(m7)
+m6 <- lmer(PupilLeft ~ C1*C2 + (1+C2|ParticipantName) + (1+C1|itemB), data = data2)
+summary(m6)
+m5 <- lmer(PupilLeft ~ C1*C2 + (1|ParticipantName) + (1+C1|itemB), data = data2)
+summary(m5)
+m0 <- lmer(PupilLeft ~ C1*C2 + (1|ParticipantName) + (1|itemB), data = data2)
+summary(m0)
+
+anova(m10,m9,m8,m7,m6,m5,m0)
+
+#Right
+m10 <- lmer(PupilRight ~ C1*C2 + (1+C1*C2|ParticipantName) + (1+C1*C2|itemB), data = data2)
+summary(m10)
+m9 <- lmer(PupilRight ~ C1*C2 + (1+C1+C2|ParticipantName) + (1+C1*C2|itemB), data = data2)
+summary(m9)
+m8 <- lmer(PupilRight ~ C1*C2 + (1+C1+C2|ParticipantName) + (1+C1+C2|itemB), data = data2)
+summary(m8)
+m7 <- lmer(PupilRight ~ C1*C2 + (1+C1+C2|ParticipantName) + (1+C1|itemB), data = data2)
+summary(m7)
+m6 <- lmer(PupilRight ~ C1*C2 + (1+C2|ParticipantName) + (1+C1|itemB), data = data2)
+summary(m6)
+m5 <- lmer(PupilRight ~ C1*C2 + (1|ParticipantName) + (1+C1|itemB), data = data2)
+summary(m5)
+m0 <- lmer(PupilRight ~ C1*C2 + (1|ParticipantName) + (1|itemB), data = data2)
+summary(m0)
+
+anova(m10,m9,m8,m7,m6,m5,m0)
+
+#Mean
+m10 <- lmer(PupilMean ~ C1*C2 + (1+C1*C2|ParticipantName) + (1+C1*C2|itemB), data = data2)
+summary(m10)
+m9 <- lmer(PupilMean ~ C1*C2 + (1+C1+C2|ParticipantName) + (1+C1*C2|itemB), data = data2)
+summary(m9)
+m8 <- lmer(PupilMean ~ C1*C2 + (1+C1+C2|ParticipantName) + (1+C1+C2|itemB), data = data2)
+summary(m8)
+m7 <- lmer(PupilMean ~ C1*C2 + (1+C1+C2|ParticipantName) + (1+C1|itemB), data = data2)
+summary(m7)
+m6 <- lmer(PupilMean ~ C1*C2 + (1+C2|ParticipantName) + (1+C1|itemB), data = data2)
+summary(m6)
+m5 <- lmer(PupilMean ~ C1*C2 + (1|ParticipantName) + (1+C1|itemB), data = data2)
+summary(m5)
+m0 <- lmer(PupilMean ~ C1*C2 + (1|ParticipantName) + (1|itemB), data = data2)
+summary(m0)
+
+anova(m10,m9,m8,m7,m6,m5,m0)
+
+#下位檢定Left
+#C1-TP a b
+data2.C1TP<-data2[data2$cond=="a"|data2$cond=="b",]
+data2.C1TP $C1 <- scale(data2.C1TP $C1, scale=F)
+data2.C1TP $C2 <- scale(data2.C1TP $C2, scale=F)
+
+m10 <- lmer(PupilLeft ~ C2 + (1+C2|ParticipantName) + (1+C2|itemB), data = data2.C1TP)
+summary(m10)
+m9 <- lmer(PupilLeft ~ C2 + (1|ParticipantName) + (1+C2|itemB), data = data2.C1TP)
+summary(m9)
+m0 <- lmer(PupilLeft ~ C2 + (1|ParticipantName) + (1|itemB), data = data2.C1TP)
+summary(m0)
+anova(m10,m9,m0)
+
+#C1-NP c d
+data2.C1NP<-data2[data2$cond=="c"|data2$cond=="d",]
+data2.C1NP $C1 <- scale(data2.C1NP $C1, scale=F)
+data2.C1NP $C2 <- scale(data2.C1NP $C2, scale=F)
+
+m10 <- lmer(PupilLeft ~ C2 + (1+C2|ParticipantName) + (1+C2|itemB), data = data2.C1NP)
+summary(m10)
+m9 <- lmer(PupilLeft ~ C2 + (1+C2|ParticipantName) + (1 |itemB), data = data2.C1NP)
+summary(m9)
+m0 <- lmer(PupilLeft ~ C2 + (1|ParticipantName) + (1|itemB), data = data2.C1NP)
+summary(m0)
+anova(m10,m9,m0)
+
+#C2-TA a c
+data2.C2TA<-data2[data2$cond=="a"|data2$cond=="c",]
+data2.C2TA$C1 <- scale(data2.C2TA$C1, scale=F)
+data2.C2TA$C2 <- scale(data2.C2TA$C2, scale=F)
+
+m10 <- lmer(PupilLeft ~ C1 + (1+C1|ParticipantName) + (1+C1|itemB), data = data2.C2TA)
+summary(m10)
+m9 <- lmer(PupilLeft ~ C1 + (1+C1|ParticipantName) + (1 |itemB), data = data2.C2TA)
+summary(m9)
+m0 <- lmer(PupilLeft ~ C1 + (1|ParticipantName) + (1|itemB), data = data2.C2TA)
+summary(m0)
+anova(m10,m9,m0)
+
+#C2-ＮＡ  bd
+data2.C2NA<-data2[data2$cond=="b"|data2$cond=="d",]
+data2.C2NA$C1 <- scale(data2.C2NA$C1, scale=F)
+data2.C2NA$C2 <- scale(data2.C2NA$C2, scale=F)
+
+m10 <- lmer(PupilLeft ~ C1 + (1+C1|ParticipantName) + (1+C1|itemB), data = data2.C2NA)
+summary(m10)
+m9 <- lmer(PupilLeft ~ C1 + (1+C1|ParticipantName) + (1 |itemB), data = data2.C2NA)
+summary(m9)
+m0 <- lmer(PupilLeft ~ C1 + (1|ParticipantName) + (1|itemB), data = data2.C2NA)
+summary(m0)
+anova(m10,m9,m0)
+
+#下位檢定Right
+#C1-TP a b
+data2.C1TP<-data2[data2$cond=="a"|data2$cond=="b",]
+data2.C1TP $C1 <- scale(data2.C1TP $C1, scale=F)
+data2.C1TP $C2 <- scale(data2.C1TP $C2, scale=F)
+
+m10 <- lmer(PupilRight ~ C2 + (1+C2|ParticipantName) + (1+C2|itemB), data = data2.C1TP)
+summary(m10)
+m9 <- lmer(PupilRight ~ C2 + (1|ParticipantName) + (1+C2|itemB), data = data2.C1TP)
+summary(m9)
+m0 <- lmer(PupilRight ~ C2 + (1|ParticipantName) + (1|itemB), data = data2.C1TP)
+summary(m0)
+anova(m10,m9,m0)
+
+#C1-NP c d
+data2.C1NP<-data2[data2$cond=="c"|data2$cond=="d",]
+data2.C1NP $C1 <- scale(data2.C1NP $C1, scale=F)
+data2.C1NP $C2 <- scale(data2.C1NP $C2, scale=F)
+
+m10 <- lmer(PupilRight ~ C2 + (1+C2|ParticipantName) + (1+C2|itemB), data = data2.C1NP)
+summary(m10)
+m9 <- lmer(PupilRight ~ C2 + (1+C2|ParticipantName) + (1 |itemB), data = data2.C1NP)
+summary(m9)
+m0 <- lmer(PupilRight ~ C2 + (1|ParticipantName) + (1|itemB), data = data2.C1NP)
+summary(m0)
+anova(m10,m9,m0)
+
+#C2-TA a c
+data2.C2TA<-data2[data2$cond=="a"|data2$cond=="c",]
+data2.C2TA$C1 <- scale(data2.C2TA$C1, scale=F)
+data2.C2TA$C2 <- scale(data2.C2TA$C2, scale=F)
+
+m10 <- lmer(PupilRight ~ C1 + (1+C1|ParticipantName) + (1+C1|itemB), data = data2.C2TA)
+summary(m10)
+m9 <- lmer(PupilRight ~ C1 + (1+C1|ParticipantName) + (1 |itemB), data = data2.C2TA)
+summary(m9)
+m0 <- lmer(PupilRight ~ C1 + (1|ParticipantName) + (1|itemB), data = data2.C2TA)
+summary(m0)
+anova(m10,m9,m0)
+
+#C2-ＮＡ  bd
+data2.C2NA<-data2[data2$cond=="b"|data2$cond=="d",]
+data2.C2NA$C1 <- scale(data2.C2NA$C1, scale=F)
+data2.C2NA$C2 <- scale(data2.C2NA$C2, scale=F)
+
+m10 <- lmer(PupilRight ~ C1 + (1+C1|ParticipantName) + (1+C1|itemB), data = data2.C2NA)
+summary(m10)
+m9 <- lmer(PupilRight ~ C1 + (1+C1|ParticipantName) + (1 |itemB), data = data2.C2NA)
+summary(m9)
+m0 <- lmer(PupilRight ~ C1 + (1|ParticipantName) + (1|itemB), data = data2.C2NA)
+summary(m0)
+anova(m10,m9,m0)
+
+#下位檢定Mean
+#C1-TP a b
+data2.C1TP<-data2[data2$cond=="a"|data2$cond=="b",]
+data2.C1TP $C1 <- scale(data2.C1TP $C1, scale=F)
+data2.C1TP $C2 <- scale(data2.C1TP $C2, scale=F)
+
+m10 <- lmer(PupilMean ~ C2 + (1+C2|ParticipantName) + (1+C2|itemB), data = data2.C1TP)
+summary(m10)
+m9 <- lmer(PupilMean ~ C2 + (1|ParticipantName) + (1+C2|itemB), data = data2.C1TP)
+summary(m9)
+m0 <- lmer(PupilMean ~ C2 + (1|ParticipantName) + (1|itemB), data = data2.C1TP)
+summary(m0)
+anova(m10,m9,m0)
+
+#C1-NP c d
+data2.C1NP<-data2[data2$cond=="c"|data2$cond=="d",]
+data2.C1NP $C1 <- scale(data2.C1NP $C1, scale=F)
+data2.C1NP $C2 <- scale(data2.C1NP $C2, scale=F)
+
+m10 <- lmer(PupilMean ~ C2 + (1+C2|ParticipantName) + (1+C2|itemB), data = data2.C1NP)
+summary(m10)
+m9 <- lmer(PupilMean ~ C2 + (1+C2|ParticipantName) + (1 |itemB), data = data2.C1NP)
+summary(m9)
+m0 <- lmer(PupilMean ~ C2 + (1|ParticipantName) + (1|itemB), data = data2.C1NP)
+summary(m0)
+anova(m10,m9,m0)
+
+#C2-TA a c
+data2.C2TA<-data2[data2$cond=="a"|data2$cond=="c",]
+data2.C2TA$C1 <- scale(data2.C2TA$C1, scale=F)
+data2.C2TA$C2 <- scale(data2.C2TA$C2, scale=F)
+
+m10 <- lmer(PupilMean ~ C1 + (1+C1|ParticipantName) + (1+C1|itemB), data = data2.C2TA)
+summary(m10)
+m9 <- lmer(PupilMean ~ C1 + (1+C1|ParticipantName) + (1 |itemB), data = data2.C2TA)
+summary(m9)
+m0 <- lmer(PupilMean ~ C1 + (1|ParticipantName) + (1|itemB), data = data2.C2TA)
+summary(m0)
+anova(m10,m9,m0)
+
+#C2-ＮＡ  bd
+data2.C2NA<-data2[data2$cond=="b"|data2$cond=="d",]
+data2.C2NA$C1 <- scale(data2.C2NA$C1, scale=F)
+data2.C2NA$C2 <- scale(data2.C2NA$C2, scale=F)
+
+m10 <- lmer(PupilMean ~ C1 + (1+C1|ParticipantName) + (1+C1|itemB), data = data2.C2NA)
+summary(m10)
+m9 <- lmer(PupilMean ~ C1 + (1+C1|ParticipantName) + (1 |itemB), data = data2.C2NA)
+summary(m9)
+m0 <- lmer(PupilMean ~ C1 + (1|ParticipantName) + (1|itemB), data = data2.C2NA)
+summary(m0)
+anova(m10,m9,m0)
+
+##想辦法取baseline，不然資料很不穩定
+dataall <- read.csv("PupilOutput1.csv", header =T)
+dataall <-dataall[dataall$PupilLeft != -1,]
+dataall <-dataall[dataall$PupilRight != -1,]
+
+colnames(dataall)
+dataall.1<-dataall[,c("ParticipantName", "itemB", "cond", "rectime2", "PupilLeft", "PupilRight")]
+dataall.1$PupilSum <- dataall.1$PupilLeft+ dataall.1$PupilRight
+dataall.1$PupilMean <- (dataall.1$PupilLeft+ dataall.1$PupilRight)/2
+
+dataall.2<-dataall.1[dataall.1$rectime2<500,]
+colnames(dataall.2)
+#[1] "ParticipantName" "itemB"           "cond"            "rectime2"       
+#[5] "PupilLeft"       "PupilRight"      "PupilSum"        "PupilMean"      
+
+baseline500<-aggregate(dataall.2$PupilMean,list(dataall.2$ParticipantName, dataall.2$itemB, dataall.2$cond),mean)
+colnames(baseline500) <-c("ParticipantName", "itemB", "cond", "PupilMean")
+baseline500$key<-paste(baseline500$ParticipantName, "_", baseline500$itemB, "_", baseline500$cond,sep="")
+
+head(dataall.1)
+dataall.1$key<-paste(dataall.1$ParticipantName, "_", dataall.1$itemB, "_", dataall.1$cond,sep="")
+dataall.3<-merge(dataall.1,baseline500,by.x="key",by.y="key",all.x=TRUE)
+colnames(dataall.3)
+#[1] "key"               "ParticipantName.x" "itemB.x"          
+# [4] "cond.x"            "rectime2"          "PupilLeft"        
+# [7] "PupilRight"        "PupilSum"          "PupilMean.x"      
+#[10] "ParticipantName.y" "itemB.y"           "cond.y"           
+#[13] "PupilMean.y"      
+dataall.4<-dataall.3[,c("ParticipantName.x", "itemB.x", "cond.x", "rectime2", "PupilLeft", "PupilRight", "PupilMean.x", "PupilMean.y")]
+
+colnames(dataall.4)<-c("ParticipantName", "itemB", "cond", "rectime2", "PupilLeft", "PupilRight", "PupilMean", "Baseline")
+
+dataall.4$PupilLeftBase<-dataall.4$PupilLeft-dataall.4$Baseline
+dataall.4$PupilRightBase<-dataall.4$PupilRight-dataall.4$Baseline
+dataall.4$PupilMeanBase<-dataall.4$PupilMean-dataall.4$Baseline
+dataall.5<-dataall.4[,c("ParticipantName", "itemB", "cond", "rectime2", "PupilLeftBase", "PupilRightBase", "PupilMeanBase")]
+colnames(dataall.5)<-c("ParticipantName", "itemB", "cond", "rectime2", "PupilLeft", "PupilRight", "PupilMean")
+dataall.5<-dataall.5[order(dataall.5$ParticipantName, dataall.5$itemB, dataall.5$cond, dataall.5$rectime2),]
+
+
+write.csv(dataall.5, "PupilOutput2.Baseline500.csv", row.names=F)
+#
+dataall.1 <- read.csv("PupilOutput2.Baseline500.csv", header =T)
+#請回到作圖部分
+
+
+
+##baseline200
+dataall <- read.csv("PupilOutput1.csv", header =T)
+dataall <-dataall[dataall$PupilLeft != -1,]
+dataall <-dataall[dataall$PupilRight != -1,]
+
+colnames(dataall)
+dataall.1<-dataall[,c("ParticipantName", "itemB", "cond", "rectime2", "PupilLeft", "PupilRight")]
+dataall.1$PupilSum <- dataall.1$PupilLeft+ dataall.1$PupilRight
+dataall.1$PupilMean <- (dataall.1$PupilLeft+ dataall.1$PupilRight)/2
+
+dataall.2<-dataall.1[dataall.1$rectime2<220,]
+colnames(dataall.2)
+#[1] "ParticipantName" "itemB"           "cond"            "rectime2"       
+#[5] "PupilLeft"       "PupilRight"      "PupilSum"        "PupilMean"      
+
+baseline200<-aggregate(dataall.2$PupilMean,list(dataall.2$ParticipantName, dataall.2$itemB, dataall.2$cond),mean)
+colnames(baseline200) <-c("ParticipantName", "itemB", "cond", "PupilMean")
+baseline200$key<-paste(baseline200$ParticipantName, "_", baseline200$itemB, "_", baseline200$cond,sep="")
+
+head(dataall.1)
+dataall.1$key<-paste(dataall.1$ParticipantName, "_", dataall.1$itemB, "_", dataall.1$cond,sep="")
+dataall.3<-merge(dataall.1,baseline200,by.x="key",by.y="key",all.x=TRUE)
+colnames(dataall.3)
+#[1] "key"               "ParticipantName.x" "itemB.x"          
+# [4] "cond.x"            "rectime2"          "PupilLeft"        
+# [7] "PupilRight"        "PupilSum"          "PupilMean.x"      
+#[10] "ParticipantName.y" "itemB.y"           "cond.y"           
+#[13] "PupilMean.y"      
+dataall.4<-dataall.3[,c("ParticipantName.x", "itemB.x", "cond.x", "rectime2", "PupilLeft", "PupilRight", "PupilMean.x", "PupilMean.y")]
+
+colnames(dataall.4)<-c("ParticipantName", "itemB", "cond", "rectime2", "PupilLeft", "PupilRight", "PupilMean", "Baseline")
+
+dataall.5<-dataall.4[dataall.4$cond=="a"| dataall.4$cond=="b"| dataall.4$cond=="c"| dataall.4$cond=="d",]
+dataall.5$cond<-as.character(dataall.5$cond)
+dataall.5$cond<-as.factor(dataall.5$cond)
+dataall.4<-dataall.5
+
+dataall.4$PupilLeftBase<-dataall.4$PupilLeft-dataall.4$Baseline
+dataall.4$PupilRightBase<-dataall.4$PupilRight-dataall.4$Baseline
+dataall.4$PupilMeanBase<-dataall.4$PupilMean-dataall.4$Baseline
+dataall.5<-dataall.4[,c("ParticipantName", "itemB", "cond", "rectime2", "PupilLeftBase", "PupilRightBase", "PupilMeanBase")]
+colnames(dataall.5)<-c("ParticipantName", "itemB", "cond", "rectime2", "PupilLeft", "PupilRight", "PupilMean")
+dataall.5<-dataall.5[order(dataall.5$ParticipantName, dataall.5$itemB, dataall.5$cond, dataall.5$rectime2),]
+
+
+write.csv(dataall.5, "PupilOutput3.Baseline200.csv", row.names=F)
+#
+dataall.1 <- read.csv("PupilOutput3.Baseline500.csv", header =T)
+#請回到作圖部分
+
+###Franklin 瞳孔徑
+data<- read.csv("PupilOutput3.Baseline200.csv ", header =T)
+
+for(i in 1:400){
+data$rectime3  <- ifelse((data$rectime2 >= (0 + (i-1)*100)),(i-1)*100,data$rectime3)
+}
+data2 <- aggregate(data$PupilMean, list(data$ParticipantName, data$itemB, data$rectime3, data$cond), mean)
+colnames(data2) <- c("subj", "trial", "time", "condition","target")
+data2<-data2[order(data2$subj, data2$trial, data2$time),]
+data2$lang <- ifelse(data2$condition == "a"| data2$condition == "b", "TP" , "NP")
+data2$cond <- ifelse(data2$condition == "a"| data2$condition == "c", "single" , "compound")
+
+
+# create copy of data frame
+pdata = data2
+pdata$cpassive = ifelse(pdata$cond == "single",0.5,-0.5)
+# create data frame which averages over subjects.  	
+# This also stores the results of the permutation analysis
+means.df = aggregate(target ~ cond + cpassive + time + lang, pdata, mean)
+means.df$pstr = 1000
+
+# permutation analysis uses simple tests to find significant regions.  
+# Here is a regression on target based on structure for one time window (400 ms) in English
+onetime = subset(pdata,time == 400 & lang == "TP")
+# do regression model on target using structure condition
+onemodel = lm(target ~ cpassive, onetime)
+print(summary(onemodel))  # 
+print(abs(coef(summary(onemodel))[2,4]))  # get observed p-value
+
+# We do this for each 100 ms window in the data
+pdata$lang <-as.factor(pdata$lang)
+pdata$cond <-as.factor(pdata$cond)
+
+timelist = unique(pdata$time)
+timelist =as.numeric(timelist)
+for (l in c("TP","NP")){
+  #for (t in timelist){
+  for (t in c(0,100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000,  3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900, 4000)) {
+    # create data frame for ONE timebin for each language
+    onetime = subset(pdata,time == t & lang == l)
+    # do regression model on target using structure condition
+    onemodel = lm(target ~ cpassive, onetime)
+    # print(summary(tarmodel))
+    # this is the t-value for structure
+    targetT = coef(summary(onemodel))[2,3]  # observed t-value
+    targetP = abs(coef(summary(onemodel))[2,4])  # observed p-value
+means.df$tstr[means.df$time == t & means.df$lang == l] = targetT
+    means.df$pstr[means.df$time == t & means.df$lang == l] = targetP
+  }
+}
+#, 4100, 4200, 4300, 4400, 4500, 4600, 4700, 4800, 4900, 5000, 5100, 5200, 5300, 5400, 5500, 5600, 5700, 5800, 5900
+
+# to see these p-values, we draw them arbitrarily on the graph at 0.2.
+# when the p-value < 0.05, we draw a blue line above 0.2
+# when the p-value > 0.05, we draw an orange line below 0.2
+wsize = 40
+pliney = 0.2
+plinemax = 0.1
+means.df$pline = pliney+plinemax*(0.05-means.df$pstr)
+means.df$plinecol = ifelse(means.df$pstr < 0.05,"a","b")
+
+p = ggplot(means.df , aes( x = time, y = target, colour=cond))
+p = p + geom_line()
+p = p + scale_colour_brewer(palette="Set1")
+p = p + scale_fill_brewer(palette="Set2")
+p = p + theme_bw()   # change background to white
+p = p + ylab("Looks to passive match")
+p = p + ylim(0,1)
+p = p + facet_wrap(~ lang, ncol=1)
+p = p + geom_rect(aes(xmin=time-wsize, xmax=time+wsize, ymin = pliney, ymax= pline, colour=NA,fill=plinecol),show.legend=FALSE)
+p
+# we can't use these p-values, because we have done 20 comparisons, 
+# so we have 20 times greater chance of finding significant effect (multiple comparisons problem)
+
+# Also, each window is not independent, so we create clusters for adjacent windows with p<0.05
+# cnum is the cluster number and we increment the number when the p value is > 0.05
+# so clusters with the same cnum are part of the same cluster
+cnum = 1
+lastpval = 100
+means.df$cnum = 1
+for (l in c("TP","NP")){
+  #for (t in timelist){
+for (t in c(0,100, 200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100, 1200, 1300, 1400, 1500, 1600, 1700, 1800, 1900, 2000, 2100, 2200, 2300, 2400, 2500, 2600, 2700, 2800, 2900, 3000,  3100, 3200, 3300, 3400, 3500, 3600, 3700, 3800, 3900, 4000, 4100, 4200, 4300, 4400, 4500, 4600, 4700, 4800, 4900, 5000, 5100)) {
+    onetime = subset(means.df,time == t & lang == l & cond == "TA")
+    pval = abs(onetime$pstr)
+    tdir = onetime$tstr
+    if (pval < 0.05 & lastpval > 0.05 ){
+      cnum = cnum + 1  # increase cluster number when entering a significant cluster from a non-significant cluster
+    }
+    if (pval > 0.05 ){  
+      cnum = cnum + 1 # increase cluster number when not significant
+    }else{
+      # if t value flips direction, even if both are signif, 
+      # we should treat those as separate clusters
+      if (lasttdir*tdir < 0){
+        cnum = cnum + 1 
+      }
+    }
+    lastpval = pval
+    lasttdir = tdir
+    means.df$cnum[means.df$time == t & means.df$lang == l] = cnum
+  }
+  cnum=cnum+1  # new cluster for different languages
+}
+head(means.df,10)
+
+# this shows the clusters
+p = ggplot(means.df , aes( x = time, y = target, colour=cond, label=cnum))
+p = p + scale_colour_brewer(palette="Set1")
+p = p + scale_fill_brewer(palette="Set2")
+p = p + theme_bw()   # change background to white
+p = p + ylab("Looks to passive match")
+p = p + ylim(0,1)
+p = p + facet_wrap(~ lang, ncol=1)
+p = p + geom_rect(aes(xmin=time-wsize, xmax=time+wsize, ymin = pliney, ymax= pline, colour=NA,fill=plinecol),show.legend=FALSE)
+p + geom_text(size=4)
+
+# we now want to identify the clusters that were significant
+# p-values are same for active and passive, so we just used the active items.
+meansonlyact.df = subset(means.df, cond == "TA")
+sigcluster = subset(meansonlyact.df, abs(pstr) < 0.05 )
+print(sigcluster)
+# this computes the sum of the t-values for each cluster
+sumcluster  = aggregate(tstr ~ cnum + lang, meansonlyact.df, sum)
+print(sumcluster)
+
+# now we create a distribution of t-values (save in permdist)
+# by randomly scrambling the active and passive labels for each time window 1000 times
+n = 1000
+exptestvalue = data.frame()
+for (s in 1:length(sigcluster$time)){
+  #  print(cl)
+  cl = sigcluster$cnum[s] # cluster number
+  b = sigcluster$time[s] # time
+  l = sigcluster$lang[s] # language
+  print(paste("b ",b," lang",l))
+  # one time point
+  onetime = subset(pdata,lang == l & time %in% b)
+  # randSet is a copy of onetime that is scrambled
+  randSet = onetime
+  
+  for (i in 1:n){
+    #  set.seed(i)
+    # randomly scramble cpassive labels without replacement
+    randSet$cpassive = sample(randSet$cpassive,length(randSet$cpassive))
+    # test if target is related to random scrambled cpassive
+    randmodel = lm(target ~ cpassive ,randSet)
+    #  print(summary(randmodel))
+    # extract and save t-values
+    t = coef(summary(randmodel))[2,3]
+    df = data.frame(t=t,cluster=cl,time=b,lang=l,sim=i)
+    exptestvalue = rbind(exptestvalue, df )
+  }
+}
+# we sum over clusters so that longer clusters have stronger t-values
+sumt.df =  aggregate(t ~ lang + cluster + sim, exptestvalue, sum)
+head(sumt.df)
+
+# simulated sum cluster histogram
+p = ggplot(sumt.df,aes(x = t))
+p = p +geom_histogram(binwidth=0.5)
+p = p + facet_wrap(~ lang)
+p+theme_bw()
+
+# this code extracts out the maximum sum t for each simulation at each age
+maxclusterdist = data.frame()
+for (l in unique(sumt.df$lang)){
+  for (s in unique(sumt.df$sim)) {
+    # get all results for one simulation in one language
+    onesim = subset(sumt.df,sim == s & lang == l)
+    onesim$astruct = abs(onesim$t)
+    # find max t-value
+    maxrow = onesim[order(onesim$astruct,decreasing = T),]
+    maxclusterdist = rbind(maxclusterdist,maxrow[1,])
+  }
+}
+head(maxclusterdist)
+
+# Shows the simulated distribution with maximum cluster t values
+maxclusterdist2 = maxclusterdist[order(maxclusterdist$lang,maxclusterdist$t),]
+end = data.frame(lang=c("TP","TP","NP","NP"),xint = maxclusterdist2[c(25,975,1025,1975),]$t)
+p = ggplot(maxclusterdist,aes(x = t))
+p = p +geom_histogram(binwidth=0.5)
+p = p +geom_vline(end,mapping=aes(xintercept=xint))
+p = p + facet_wrap(~ lang)
+p+theme_bw()
+
+# maxclusterdist is sorted by language, 
+# so first 1000 are English and second 1000 are Japanese
+emaxclusterdist = maxclusterdist$t[1:1000]
+jmaxclusterdist = maxclusterdist$t[1001:2000]
+
+# this identifies tvalues that are greater than dist t-values
+for (cl in unique(sumcluster$cnum)){
+  bins = unique(means.df[means.df$cnum == cl,]$time)
+  lan = sumcluster$lang[sumcluster$cnum == cl][1]
+  
+  tstr = abs(sumcluster$tstr[sumcluster$cnum==cl])
+  # permutation t distribution depends on language
+  if (lan == "English"){
+    permtdist = emaxclusterdist
+  }else{
+    permtdist = jmaxclusterdist
+  }
+  # permtdist is the dist t-values, 
+  # so p value is proportion of values greater than observed t-value.
+  pstr = sum(abs(permtdist) > tstr, na.rm = TRUE)/length(permtdist)
+  if (tstr > 2){
+  print(paste("Cluster ",cl," Observed sum t ",round(tstr,3)," Proportion dist > observed (p-value) ",pstr))
+  }
+  means.df$permtestp[means.df$time %in% bins & means.df$lang == lan] = pstr
+}
+
+# now we update our plot
+p = ggplot(means.df , aes( x = time, y = target, colour=cond))
+# this pulls out the clusters which are significant by the permutation test
+meansigStr = subset(means.df,permtestp < 0.025) 
+# color them grey
+if (length(meansigStr$time) > 0){
+  p = p + geom_rect(data=meansigStr,aes(xmin=time-50, xmax=time+50, ymin = pliney+0.1, ymax= 1.0),,colour=NA,fill="grey90",show.legend=FALSE)
+}
+# same as before
+p = p + geom_line()
+p = p + scale_colour_brewer(palette="Set1")
+p = p + scale_fill_brewer(palette="Set2")
+p = p + theme_bw()   # change background to white
+p = p + ylab("Looks to passive match")
+p = p + ylim(0,1)
+p = p + facet_wrap(~ lang, ncol=1)
+p = p + geom_vline(xintercept = 500,colour="black", linetype = 2) 
+p = p + geom_vline(xintercept = 1000,colour="black", linetype = 2) 
+p = p + geom_vline(xintercept = 1500,colour="black", linetype = 2) 
+p = p + geom_vline(xintercept = 2000,colour="black", linetype = 2) 
+p = p + geom_rect(aes(xmin=time-wsize, xmax=time+wsize, ymin = pliney, ymax= pline, colour=NA,fill=plinecol),show.legend=FALSE)
+p
+ggsave("perm.png")
+
